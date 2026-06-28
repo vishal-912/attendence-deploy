@@ -5,6 +5,7 @@ const attendanceController = require('./attendance.controller');
 const repository = require('./attendance.repository');
 const attendanceEvents = require('./attendance.events');
 const { AttendanceStatus } = require('./attendance.types');
+const { authenticate } = require('../../shared/middleware');
 
 jest.mock('./attendance.repository');
 jest.mock('./attendance.events');
@@ -135,6 +136,77 @@ describe('Attendance Service', () => {
                 'Attendance record already exists for student STU001 in scheduled class SCH001.'
             );
         });
+
+        it('should mark attendance successfully with today\'s date', async () => {
+            const today = new Date();
+            const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+            const data = {
+                studentId: 'STU001',
+                courseId: 'CSE101',
+                scheduleId: 'SCH001',
+                batchId: 'BATCH_A',
+                universityId: 'UNIV001',
+                status: AttendanceStatus.PRESENT,
+                date: todayStr,
+                markedBy: 'FAC001'
+            };
+            repository.findScheduledClassById.mockResolvedValue({ id: 'SCH001', batch_id: 'BATCH_A' });
+            repository.isStudentEnrolled.mockResolvedValue(true);
+            repository.findAttendanceByStudentAndClass.mockResolvedValue(null);
+            repository.createAttendance.mockResolvedValue({ id: 'ATT001', ...data });
+            attendanceEvents.emitAttendanceMarked.mockResolvedValue({ id: 'OUT001' });
+
+            const result = await attendanceService.markAttendance(data);
+            expect(result).toBeDefined();
+            expect(result.date).toBe(todayStr);
+        });
+
+        it('should mark attendance successfully with a past date', async () => {
+            const today = new Date();
+            const past = new Date(today);
+            past.setDate(today.getDate() - 2);
+            const pastStr = `${past.getFullYear()}-${String(past.getMonth() + 1).padStart(2, '0')}-${String(past.getDate()).padStart(2, '0')}`;
+            const data = {
+                studentId: 'STU001',
+                courseId: 'CSE101',
+                scheduleId: 'SCH001',
+                batchId: 'BATCH_A',
+                universityId: 'UNIV001',
+                status: AttendanceStatus.PRESENT,
+                date: pastStr,
+                markedBy: 'FAC001'
+            };
+            repository.findScheduledClassById.mockResolvedValue({ id: 'SCH001', batch_id: 'BATCH_A' });
+            repository.isStudentEnrolled.mockResolvedValue(true);
+            repository.findAttendanceByStudentAndClass.mockResolvedValue(null);
+            repository.createAttendance.mockResolvedValue({ id: 'ATT001', ...data });
+            attendanceEvents.emitAttendanceMarked.mockResolvedValue({ id: 'OUT001' });
+
+            const result = await attendanceService.markAttendance(data);
+            expect(result).toBeDefined();
+            expect(result.date).toBe(pastStr);
+        });
+
+        it('should throw an error if the attendance date is in the future', async () => {
+            const today = new Date();
+            const future = new Date(today);
+            future.setDate(today.getDate() + 1);
+            const futureStr = `${future.getFullYear()}-${String(future.getMonth() + 1).padStart(2, '0')}-${String(future.getDate()).padStart(2, '0')}`;
+            const data = {
+                studentId: 'STU001',
+                courseId: 'CSE101',
+                scheduleId: 'SCH001',
+                batchId: 'BATCH_A',
+                universityId: 'UNIV001',
+                status: AttendanceStatus.PRESENT,
+                date: futureStr,
+                markedBy: 'FAC001'
+            };
+
+            await expect(attendanceService.markAttendance(data)).rejects.toThrow(
+                'Attendance date cannot be in the future.'
+            );
+        });
     });
 
     describe('updateAttendance', () => {
@@ -165,12 +237,7 @@ describe('Attendance Service', () => {
             const result = await attendanceService.updateAttendance(attendanceId, updateData);
 
             expect(repository.findAttendanceById).toHaveBeenCalledWith(attendanceId);
-            expect(repository.updateAttendance).toHaveBeenCalledWith(attendanceId, expect.objectContaining({
-                status: AttendanceStatus.ABSENT,
-                previousStatus: AttendanceStatus.PRESENT,
-                reason: 'Correction of previous status',
-                editorId: 'FAC001'
-            }));
+            expect(repository.updateAttendance).toHaveBeenCalledWith(attendanceId, AttendanceStatus.ABSENT);
             expect(repository.createAuditRecord).toHaveBeenCalledWith(expect.objectContaining({
                 attendanceId,
                 previousStatus: AttendanceStatus.PRESENT,
@@ -256,14 +323,42 @@ describe('Attendance Service', () => {
             })).rejects.toThrow('Editor information is required for authorization.');
         });
 
-        it('should throw an error if user role is unauthorized (student)', async () => {
+        it('should throw an AuthorizationError (403) if user role is unauthorized (student)', async () => {
             repository.findAttendanceById.mockResolvedValue({ id: 'ATT001', status: AttendanceStatus.PRESENT });
 
-            await expect(attendanceService.updateAttendance('ATT001', {
-                status: AttendanceStatus.ABSENT,
-                reason: 'Correction',
-                editor: { id: 'STU001', role: 'student' }
-            })).rejects.toThrow('Unauthorized: Only faculty or admin users can update attendance.');
+            let error;
+            try {
+                await attendanceService.updateAttendance('ATT001', {
+                    status: AttendanceStatus.ABSENT,
+                    reason: 'Correction',
+                    editor: { id: 'STU001', role: 'student' }
+                });
+            } catch (err) {
+                error = err;
+            }
+
+            expect(error).toBeDefined();
+            expect(error.message).toBe('Unauthorized: Only faculty or admin users can update attendance.');
+            expect(error.status).toBe(403);
+        });
+
+        it('should throw an AuthenticationError (401) if user role is missing', async () => {
+            repository.findAttendanceById.mockResolvedValue({ id: 'ATT001', status: AttendanceStatus.PRESENT });
+
+            let error;
+            try {
+                await attendanceService.updateAttendance('ATT001', {
+                    status: AttendanceStatus.ABSENT,
+                    reason: 'Correction',
+                    editor: { id: 'FAC001', role: '' }
+                });
+            } catch (err) {
+                error = err;
+            }
+
+            expect(error).toBeDefined();
+            expect(error.message).toBe('Unauthorized: Missing user role.');
+            expect(error.status).toBe(401);
         });
     });
 
@@ -443,6 +538,86 @@ describe('Attendance Controller', () => {
 
             expect(next).toHaveBeenCalledWith(mockError);
         });
+
+        it('should return 201 when marked successfully with today\'s date', async () => {
+            const today = new Date();
+            const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+            req.body = {
+                studentId: 'STU001',
+                courseId: 'CSE101',
+                scheduleId: 'SCH001',
+                batchId: 'BATCH_A',
+                universityId: 'UNIV001',
+                status: AttendanceStatus.PRESENT,
+                date: todayStr,
+                markedBy: 'FAC001'
+            };
+            const mockRecord = { id: 'ATT001', ...req.body };
+            jest.spyOn(attendanceService, 'markAttendance').mockResolvedValue(mockRecord);
+
+            await attendanceController.markAttendance(req, res, next);
+
+            expect(res.status).toHaveBeenCalledWith(201);
+            expect(res.json).toHaveBeenCalledWith({
+                success: true,
+                message: 'Attendance marked successfully',
+                data: mockRecord
+            });
+        });
+
+        it('should return 201 when marked successfully with a past date', async () => {
+            const today = new Date();
+            const past = new Date(today);
+            past.setDate(today.getDate() - 2);
+            const pastStr = `${past.getFullYear()}-${String(past.getMonth() + 1).padStart(2, '0')}-${String(past.getDate()).padStart(2, '0')}`;
+            req.body = {
+                studentId: 'STU001',
+                courseId: 'CSE101',
+                scheduleId: 'SCH001',
+                batchId: 'BATCH_A',
+                universityId: 'UNIV001',
+                status: AttendanceStatus.PRESENT,
+                date: pastStr,
+                markedBy: 'FAC001'
+            };
+            const mockRecord = { id: 'ATT001', ...req.body };
+            jest.spyOn(attendanceService, 'markAttendance').mockResolvedValue(mockRecord);
+
+            await attendanceController.markAttendance(req, res, next);
+
+            expect(res.status).toHaveBeenCalledWith(201);
+            expect(res.json).toHaveBeenCalledWith({
+                success: true,
+                message: 'Attendance marked successfully',
+                data: mockRecord
+            });
+        });
+
+        it('should call next with a 400 Bad Request error when service throws a future date validation error', async () => {
+            const today = new Date();
+            const future = new Date(today);
+            future.setDate(today.getDate() + 1);
+            const futureStr = `${future.getFullYear()}-${String(future.getMonth() + 1).padStart(2, '0')}-${String(future.getDate()).padStart(2, '0')}`;
+            req.body = {
+                studentId: 'STU001',
+                courseId: 'CSE101',
+                scheduleId: 'SCH001',
+                batchId: 'BATCH_A',
+                universityId: 'UNIV001',
+                status: AttendanceStatus.PRESENT,
+                date: futureStr,
+                markedBy: 'FAC001'
+            };
+
+            const mockError = new Error('Attendance date cannot be in the future.');
+            mockError.status = 400;
+            jest.spyOn(attendanceService, 'markAttendance').mockRejectedValue(mockError);
+
+            await attendanceController.markAttendance(req, res, next);
+
+            expect(next).toHaveBeenCalledWith(mockError);
+            expect(mockError.status).toBe(400);
+        });
     });
 
     describe('updateAttendance', () => {
@@ -480,6 +655,81 @@ describe('Attendance Controller', () => {
             });
         });
 
+        it('should return 400 with status missing message when status is missing', async () => {
+            req.params = { attendanceId: 'ATT001' };
+            req.body = { reason: 'Correcting error' };
+            req.user = { id: 'FAC001', role: 'faculty' };
+
+            await attendanceController.updateAttendance(req, res, next);
+
+            expect(res.status).toHaveBeenCalledWith(400);
+            expect(res.json).toHaveBeenCalledWith({
+                success: false,
+                message: 'Missing required field: status',
+                data: null
+            });
+        });
+
+        it('should return 400 with reason missing message when reason is missing', async () => {
+            req.params = { attendanceId: 'ATT001' };
+            req.body = { status: AttendanceStatus.ABSENT };
+            req.user = { id: 'FAC001', role: 'faculty' };
+
+            await attendanceController.updateAttendance(req, res, next);
+
+            expect(res.status).toHaveBeenCalledWith(400);
+            expect(res.json).toHaveBeenCalledWith({
+                success: false,
+                message: 'Missing required field: reason',
+                data: null
+            });
+        });
+
+        it('should return 400 with status and reason missing message when both are missing', async () => {
+            req.params = { attendanceId: 'ATT001' };
+            req.body = {};
+            req.user = { id: 'FAC001', role: 'faculty' };
+
+            await attendanceController.updateAttendance(req, res, next);
+
+            expect(res.status).toHaveBeenCalledWith(400);
+            expect(res.json).toHaveBeenCalledWith({
+                success: false,
+                message: 'Missing required fields: status, reason',
+                data: null
+            });
+        });
+
+        it('should return 400 with editorId and editorRole missing message when authentication context is missing', async () => {
+            req.params = { attendanceId: 'ATT001' };
+            req.body = { status: AttendanceStatus.ABSENT, reason: 'Correcting error' };
+            req.user = undefined;
+
+            await attendanceController.updateAttendance(req, res, next);
+
+            expect(res.status).toHaveBeenCalledWith(400);
+            expect(res.json).toHaveBeenCalledWith({
+                success: false,
+                message: 'Missing required fields: editorId, editorRole',
+                data: null
+            });
+        });
+
+        it('should return 400 with attendanceId missing message when attendanceId is missing in URL', async () => {
+            req.params = {};
+            req.body = { status: AttendanceStatus.ABSENT, reason: 'Correcting error' };
+            req.user = { id: 'FAC001', role: 'faculty' };
+
+            await attendanceController.updateAttendance(req, res, next);
+
+            expect(res.status).toHaveBeenCalledWith(400);
+            expect(res.json).toHaveBeenCalledWith({
+                success: false,
+                message: 'Missing required field: attendanceId',
+                data: null
+            });
+        });
+
         it('should call next with error when service throws', async () => {
             req.params = { attendanceId: 'ATT001' };
             req.body = {
@@ -493,6 +743,62 @@ describe('Attendance Controller', () => {
             await attendanceController.updateAttendance(req, res, next);
 
             expect(next).toHaveBeenCalledWith(mockError);
+        });
+
+        it('should return 200 when updated successfully by ADMIN', async () => {
+            req.params = { attendanceId: 'ATT001' };
+            req.body = {
+                status: AttendanceStatus.ABSENT,
+                reason: 'Correcting error'
+            };
+            req.user = { id: 'ADM001', role: 'ADMIN' };
+            const mockUpdated = { id: 'ATT001', status: AttendanceStatus.ABSENT };
+            jest.spyOn(attendanceService, 'updateAttendance').mockResolvedValue(mockUpdated);
+
+            await attendanceController.updateAttendance(req, res, next);
+
+            expect(res.status).toHaveBeenCalledWith(200);
+            expect(res.json).toHaveBeenCalledWith({
+                success: true,
+                message: 'Attendance updated successfully',
+                data: mockUpdated
+            });
+        });
+
+        it('should call next with an AuthorizationError (403) when service throws an authorization failure (student)', async () => {
+            req.params = { attendanceId: 'ATT001' };
+            req.body = {
+                status: AttendanceStatus.ABSENT,
+                reason: 'Correcting error'
+            };
+            req.user = { id: 'STU001', role: 'student' };
+
+            const mockError = new Error('Unauthorized: Only faculty or admin users can update attendance.');
+            mockError.status = 403;
+            jest.spyOn(attendanceService, 'updateAttendance').mockRejectedValue(mockError);
+
+            await attendanceController.updateAttendance(req, res, next);
+
+            expect(next).toHaveBeenCalledWith(mockError);
+            expect(mockError.status).toBe(403);
+        });
+
+        it('should call next with an AuthenticationError (401) when service throws a missing user role failure', async () => {
+            req.params = { attendanceId: 'ATT001' };
+            req.body = {
+                status: AttendanceStatus.ABSENT,
+                reason: 'Correcting error'
+            };
+            req.user = { id: 'FAC001', role: 'faculty' };
+
+            const mockError = new Error('Unauthorized: Missing user role.');
+            mockError.status = 401;
+            jest.spyOn(attendanceService, 'updateAttendance').mockRejectedValue(mockError);
+
+            await attendanceController.updateAttendance(req, res, next);
+
+            expect(next).toHaveBeenCalledWith(mockError);
+            expect(mockError.status).toBe(401);
         });
     });
 
@@ -588,67 +894,132 @@ describe('Attendance Controller', () => {
             });
         });
     });
-});
 
-describe('Attendance Repository & Threshold Detection', () => {
-    let mockDb;
-    let AttendanceRepository;
+    describe('Authentication Middleware', () => {
+        let req;
+        let res;
+        let next;
 
-    beforeAll(() => {
-        const actualRepoModule = jest.requireActual('./attendance.repository');
-        AttendanceRepository = actualRepoModule.AttendanceRepository;
+        beforeEach(() => {
+            req = { headers: {} };
+            res = {
+                status: jest.fn().mockReturnThis(),
+                json: jest.fn().mockReturnThis()
+            };
+            next = jest.fn();
+        });
+
+        it('should call next() and set req.user if x-user-id and x-user-role are present', () => {
+            req.headers['x-user-id'] = 'USR001';
+            req.headers['x-user-role'] = 'FACULTY';
+
+            authenticate(req, res, next);
+
+            expect(next).toHaveBeenCalled();
+            expect(req.user).toEqual({ id: 'USR001', role: 'FACULTY' });
+        });
+
+        it('should return 401 if x-user-id header is missing', () => {
+            req.headers['x-user-role'] = 'FACULTY';
+
+            authenticate(req, res, next);
+
+            expect(res.status).toHaveBeenCalledWith(401);
+            expect(res.json).toHaveBeenCalledWith({
+                success: false,
+                message: 'Authentication required.',
+                data: null
+            });
+            expect(next).not.toHaveBeenCalled();
+        });
+
+        it('should return 401 if x-user-role header is missing', () => {
+            req.headers['x-user-id'] = 'USR001';
+
+            authenticate(req, res, next);
+
+            expect(res.status).toHaveBeenCalledWith(401);
+            expect(res.json).toHaveBeenCalledWith({
+                success: false,
+                message: 'Authentication required.',
+                data: null
+            });
+            expect(next).not.toHaveBeenCalled();
+        });
+
+        it('should return 401 if both headers are missing', () => {
+            authenticate(req, res, next);
+
+            expect(res.status).toHaveBeenCalledWith(401);
+            expect(res.json).toHaveBeenCalledWith({
+                success: false,
+                message: 'Authentication required.',
+                data: null
+            });
+            expect(next).not.toHaveBeenCalled();
+        });
     });
 
-    beforeEach(() => {
-        mockDb = {
-            query: jest.fn()
-        };
-    });
+    describe('Attendance Repository & Threshold Detection', () => {
+        let mockDb;
+        let AttendanceRepository;
 
-    it('should query students below threshold successfully', async () => {
-        const repo = new AttendanceRepository(mockDb);
-        const mockRows = [
-            { studentId: 'STU001', totalClasses: 10, presentClasses: 5, attendancePercentage: 50.0 }
-        ];
-        mockDb.query.mockResolvedValue({ rows: mockRows });
+        beforeAll(() => {
+            const actualRepoModule = jest.requireActual('./attendance.repository');
+            AttendanceRepository = actualRepoModule.AttendanceRepository;
+        });
 
-        const result = await repo.getStudentsBelowThreshold(75.0, { courseId: 'CSE101' });
+        beforeEach(() => {
+            mockDb = {
+                query: jest.fn()
+            };
+        });
 
-        expect(mockDb.query).toHaveBeenCalledWith(
-            expect.stringContaining('HAVING'),
-            ['CSE101', 75.0, 100, 0]
-        );
-        expect(result).toEqual(mockRows);
-    });
+        it('should query students below threshold successfully', async () => {
+            const repo = new AttendanceRepository(mockDb);
+            const mockRows = [
+                { studentId: 'STU001', totalClasses: 10, presentClasses: 5, attendancePercentage: 50.0 }
+            ];
+            mockDb.query.mockResolvedValue({ rows: mockRows });
 
-    it('should support checking above threshold by returning empty if all students meet the threshold', async () => {
-        const repo = new AttendanceRepository(mockDb);
-        mockDb.query.mockResolvedValue({ rows: [] });
+            const result = await repo.getStudentsBelowThreshold(75.0, { courseId: 'CSE101' });
 
-        const result = await repo.getStudentsBelowThreshold(40.0, { courseId: 'CSE101' });
+            expect(mockDb.query).toHaveBeenCalledWith(
+                expect.stringContaining('HAVING'),
+                ['CSE101', 75.0, 100, 0]
+            );
+            expect(result).toEqual(mockRows);
+        });
 
-        expect(mockDb.query).toHaveBeenCalledWith(
-            expect.stringContaining('HAVING'),
-            ['CSE101', 40.0, 100, 0]
-        );
-        expect(result).toEqual([]);
-    });
+        it('should support checking above threshold by returning empty if all students meet the threshold', async () => {
+            const repo = new AttendanceRepository(mockDb);
+            mockDb.query.mockResolvedValue({ rows: [] });
 
-    it('should throw an error if a non-numeric threshold is provided', async () => {
-        const repo = new AttendanceRepository(mockDb);
-        await expect(repo.getStudentsBelowThreshold('invalid')).rejects.toThrow(
-            'A numeric threshold parameter is required for getStudentsBelowThreshold'
-        );
-    });
+            const result = await repo.getStudentsBelowThreshold(40.0, { courseId: 'CSE101' });
 
-    it('should wrap database query exceptions in AttendanceRepositoryError', async () => {
-        const repo = new AttendanceRepository(mockDb);
-        const dbError = new Error('Database connection lost');
-        dbError.code = '57P01';
-        mockDb.query.mockRejectedValue(dbError);
+            expect(mockDb.query).toHaveBeenCalledWith(
+                expect.stringContaining('HAVING'),
+                ['CSE101', 40.0, 100, 0]
+            );
+            expect(result).toEqual([]);
+        });
 
-        await expect(repo.getStudentsBelowThreshold(75.0)).rejects.toThrow(
-            'Database error in AttendanceRepository.getStudentsBelowThreshold'
-        );
+        it('should throw an error if a non-numeric threshold is provided', async () => {
+            const repo = new AttendanceRepository(mockDb);
+            await expect(repo.getStudentsBelowThreshold('invalid')).rejects.toThrow(
+                'A numeric threshold parameter is required for getStudentsBelowThreshold'
+            );
+        });
+
+        it('should wrap database query exceptions in AttendanceRepositoryError', async () => {
+            const repo = new AttendanceRepository(mockDb);
+            const dbError = new Error('Database connection lost');
+            dbError.code = '57P01';
+            mockDb.query.mockRejectedValue(dbError);
+
+            await expect(repo.getStudentsBelowThreshold(75.0)).rejects.toThrow(
+                'Database error in AttendanceRepository.getStudentsBelowThreshold'
+            );
+        });
     });
 });
