@@ -156,7 +156,8 @@ const getAttendancePercentage = async (req, res, next) => {
 const updateAttendance = async (req, res, next) => {
   try {
     const { attendanceId } = req.params;
-    const { status, editorId, editorRole, reason } = req.body;
+    const { status, reason } = req.body;
+    const { id: editorId, role: editorRole } = req.user || {};
 
     if (!attendanceId || !status || !editorId || !editorRole || !reason) {
       return res.status(400).json({
