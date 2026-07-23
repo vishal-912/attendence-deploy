@@ -123,7 +123,11 @@ async function markAttendance(data) {
 
   const savedRecord = await repository.createAttendance(payload);
 
-  await attendanceEvents.emitAttendanceMarked(savedRecord);
+  try {
+    await attendanceEvents.emitAttendanceMarked(savedRecord);
+  } catch (eventError) {
+    console.error('Failed to emit AttendanceMarked event:', eventError);
+  }
 
   return savedRecord;
 }
@@ -219,7 +223,11 @@ async function updateAttendance(attendanceId, updateData) {
 
   await repository.createAuditRecord(auditLog);
 
-  await attendanceEvents.emitAttendanceUpdated(auditLog);
+  try {
+    await attendanceEvents.emitAttendanceUpdated(auditLog);
+  } catch (eventError) {
+    console.error('Failed to emit AttendanceUpdated event:', eventError);
+  }
 
   return updatedRecord;
 }
