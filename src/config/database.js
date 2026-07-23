@@ -4,43 +4,129 @@ const crypto = require('crypto');
 
 // In-memory tables
 const tables = {
-  attendance: [],
-  attendance_audit: [],
-  scheduled_classes: [
-    { id: 'schedule-1', batch_id: 'batch-1', course_id: 'course-1', university_id: 'univ-1' }
-  ],
-  scheduled_classes: [
+  attendance: [
     {
-      id: "SCH001",
-      batch_id: "CSE-2023-A",
-      course_id: "CS101",
-      university_id: "SRM"
+      id: 'att-001',
+      student_id: '11723210018',
+      course_id: 'CS101',
+      schedule_id: 'SCH001',
+      batch_id: 'CSE-2023-A',
+      university_id: 'SRM',
+      status: 'PRESENT',
+      date: new Date('2026-07-20T10:00:00Z'),
+      marked_by: 'editor-1',
+      created_at: new Date('2026-07-20T10:00:00Z'),
+      updated_at: new Date('2026-07-20T10:00:00Z')
     },
     {
-      id: "SCH002",
-      batch_id: "CSE-2023-B",
-      course_id: "CS102",
-      university_id: "JECRC"
+      id: 'att-002',
+      student_id: '11723210019',
+      course_id: 'CS101',
+      schedule_id: 'SCH001',
+      batch_id: 'CSE-2023-A',
+      university_id: 'SRM',
+      status: 'ABSENT',
+      date: new Date('2026-07-20T10:00:00Z'),
+      marked_by: 'editor-1',
+      created_at: new Date('2026-07-20T10:00:00Z'),
+      updated_at: new Date('2026-07-20T10:00:00Z')
+    },
+    {
+      id: 'att-003',
+      student_id: '11723210018',
+      course_id: 'CS101',
+      schedule_id: 'SCH001',
+      batch_id: 'CSE-2023-A',
+      university_id: 'SRM',
+      status: 'PRESENT',
+      date: new Date('2026-07-21T10:00:00Z'),
+      marked_by: 'editor-1',
+      created_at: new Date('2026-07-21T10:00:00Z'),
+      updated_at: new Date('2026-07-21T10:00:00Z')
+    },
+    {
+      id: 'att-004',
+      student_id: '11723210019',
+      course_id: 'CS101',
+      schedule_id: 'SCH001',
+      batch_id: 'CSE-2023-A',
+      university_id: 'SRM',
+      status: 'PRESENT',
+      date: new Date('2026-07-21T10:00:00Z'),
+      marked_by: 'editor-1',
+      created_at: new Date('2026-07-21T10:00:00Z'),
+      updated_at: new Date('2026-07-21T10:00:00Z')
+    },
+    {
+      id: 'att-005',
+      student_id: '11723210020',
+      course_id: 'CS102',
+      schedule_id: 'SCH002',
+      batch_id: 'CSE-2023-B',
+      university_id: 'JECRC',
+      status: 'LATE',
+      date: new Date('2026-07-20T11:00:00Z'),
+      marked_by: 'editor-2',
+      created_at: new Date('2026-07-20T11:00:00Z'),
+      updated_at: new Date('2026-07-20T11:00:00Z')
+    },
+    {
+      id: 'att-006',
+      student_id: '11723210021',
+      course_id: 'CS102',
+      schedule_id: 'SCH002',
+      batch_id: 'CSE-2023-B',
+      university_id: 'JECRC',
+      status: 'PRESENT',
+      date: new Date('2026-07-20T11:00:00Z'),
+      marked_by: 'editor-2',
+      created_at: new Date('2026-07-20T11:00:00Z'),
+      updated_at: new Date('2026-07-20T11:00:00Z')
+    }
+  ],
+  attendance_audit: [],
+  scheduled_classes: [
+    {
+      id: 'schedule-1',
+      batch_id: 'batch-1',
+      course_id: 'course-1',
+      university_id: 'univ-1'
+    },
+    {
+      id: 'SCH001',
+      batch_id: 'CSE-2023-A',
+      course_id: 'CS101',
+      university_id: 'SRM'
+    },
+    {
+      id: 'SCH002',
+      batch_id: 'CSE-2023-B',
+      course_id: 'CS102',
+      university_id: 'JECRC'
+    },
+    {
+      id: 'SCH003',
+      batch_id: 'CSE-2024-A',
+      course_id: 'CS103',
+      university_id: 'SRM'
+    },
+    {
+      id: 'SCH004',
+      batch_id: 'CSE-2024-B',
+      course_id: 'CS104',
+      university_id: 'JECRC'
     }
   ],
 
   student_batches: [
-    {
-      student_id: "11723210018",
-      batch_id: "CSE-2023-A"
-    },
-    {
-      student_id: "11723210019",
-      batch_id: "CSE-2023-A"
-    },
-    {
-      student_id: "11723210020",
-      batch_id: "CSE-2023-B"
-    },
-    {
-      student_id: "11723210021",
-      batch_id: "CSE-2023-B"
-    }
+    { student_id: '11723210018', batch_id: 'CSE-2023-A' },
+    { student_id: '11723210019', batch_id: 'CSE-2023-A' },
+    { student_id: '11723210020', batch_id: 'CSE-2023-B' },
+    { student_id: '11723210021', batch_id: 'CSE-2023-B' },
+    { student_id: '11723210022', batch_id: 'CSE-2024-A' },
+    { student_id: '11723210023', batch_id: 'CSE-2024-A' },
+    { student_id: '11723210024', batch_id: 'CSE-2024-B' },
+    { student_id: '11723210025', batch_id: 'CSE-2024-B' }
   ],
   outbox: []
 };
